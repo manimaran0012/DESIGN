@@ -24,13 +24,13 @@ const int WIFI_COUNT = 3;
 #define RELAY3 27  // LIGHT2
 
 // ==============================
-// 🔹 INA219 Connections (I2C)
+// 🔹 INA219 (I2C) Connections
 // ==============================
-// ESP32  --->  INA219
-// 3.3V   --->  VCC
-// GND    --->  GND
-// GPIO 21 ---> SDA
-// GPIO 22 ---> SCL
+// ESP32 → INA219
+// 3.3V  → VCC
+// GND   → GND
+// GPIO21 → SDA
+// GPIO22 → SCL
 Adafruit_INA219 ina219;
 
 // ==============================
@@ -38,18 +38,15 @@ Adafruit_INA219 ina219;
 // ==============================
 unsigned long previousMillis = 0;
 unsigned long sensorMillis = 0;
-const long firebaseInterval = 500;   // Read relay states every 0.5s
-const long sensorInterval = 2000;    // Send INA219 data every 2s
+const long firebaseInterval = 500;   // Relay update every 0.5s
+const long sensorInterval = 2000;    // Sensor upload every 2s
 
 // =============================================================
 // 🔹 SETUP
 // =============================================================
 void setup() {
   Serial.begin(115200);
-
-  // Initialize I2C for INA219
-  Wire.begin(21, 22);  // SDA=21, SCL=22
-  delay(100);
+  Wire.begin(21, 22);  // SDA, SCL
 
   connectToWiFi();
 
@@ -58,12 +55,12 @@ void setup() {
   pinMode(RELAY3, OUTPUT);
 
   if (!ina219.begin()) {
-    Serial.println("❌ INA219 not found! Check wiring and I2C address.");
+    Serial.println("❌ INA219 not found! Check wiring!");
     while (1);
   }
-  ina219.setCalibration_32V_2A();
 
-  Serial.println("✅ Setup complete! Monitoring Firebase and INA219...");
+  ina219.setCalibration_32V_2A();
+  Serial.println("✅ Setup Complete! Monitoring started...");
 }
 
 // =============================================================
@@ -72,13 +69,13 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // --- Control relays from Firebase ---
+  // --- Read relays from Firebase ---
   if (currentMillis - previousMillis >= firebaseInterval) {
     previousMillis = currentMillis;
     updateRelaysFromFirebase();
   }
 
-  // --- Read and upload INA219 data ---
+  // --- Read INA219 sensor and upload ---
   if (currentMillis - sensorMillis >= sensorInterval) {
     sensorMillis = currentMillis;
     readAndUploadINA219();
@@ -99,7 +96,7 @@ void updateRelaysFromFirebase() {
     light1.trim(); light1.replace("\"", "");
     light2.trim(); light2.replace("\"", "");
 
-    Serial.printf("Firebase -> FAN:%s | LIGHT1:%s | LIGHT2:%s\n",
+    Serial.printf("FIREBASE -> FAN:%s | LIGHT1:%s | LIGHT2:%s\n",
                   fan.c_str(), light1.c_str(), light2.c_str());
 
     // Control relays (LOW-level trigger)
@@ -107,7 +104,7 @@ void updateRelaysFromFirebase() {
     digitalWrite(RELAY2, light1.equalsIgnoreCase("true") ? LOW : HIGH);
     digitalWrite(RELAY3, light2.equalsIgnoreCase("true") ? LOW : HIGH);
   } else {
-    Serial.println("⚠️ Failed to read Firebase data");
+    Serial.println("⚠️ Failed to read Firebase control data!");
   }
 }
 
@@ -115,33 +112,35 @@ void updateRelaysFromFirebase() {
 // 🔹 FUNCTION: Read INA219 Data and Upload to Firebase
 // =============================================================
 void readAndUploadINA219() {
-  float busVoltage = ina219.getBusVoltage_V();      // Voltage (V)
-  float current_mA = ina219.getCurrent_mA();        // Current (mA)
-  float power_mW = ina219.getPower_mW();            // Power (mW)
+  float busVoltage = ina219.getBusVoltage_V();      // V
+  float current_mA = ina219.getCurrent_mA();        // mA
+  float power_mW = ina219.getPower_mW();            // mW
 
   float current_A = current_mA / 1000.0;            // Convert to A
   float power_W = power_mW / 1000.0;                // Convert to W
 
-  // Battery percentage for 3S Li-ion (9.6V–12.6V)
+  // Battery % for 3S Li-ion (12.6V full, 9.6V empty)
   float percent = (busVoltage - 9.6) * 100 / (12.6 - 9.6);
   if (percent > 100) percent = 100;
   if (percent < 0) percent = 0;
 
-  // Print values
-  Serial.println("--------- INA219 Sensor Data ---------");
-  Serial.printf("Voltage: %.2f V | Current: %.3f A | Power: %.3f W | Battery: %.1f%%\n",
-                busVoltage, current_A, power_W, percent);
-  Serial.println("--------------------------------------");
+  // 🔸 PRINT VALUES (IN UPPERCASE FORMAT)
+  Serial.println("------------------------------------------");
+  Serial.printf("VOLTAGE : %.2f V\n", busVoltage);
+  Serial.printf("CURRENT : %.3f A\n", current_A);
+  Serial.printf("POWER : %.3f W\n", power_W);
+  Serial.printf("BATTERY_PERCENTAGE : %.1f %%\n", percent);
+  Serial.println("------------------------------------------\n");
 
-  // Upload to Firebase
-  fb.setFloat("SOLAR_HOME_AUTOMATION/Voltage", busVoltage);
-  fb.setFloat("SOLAR_HOME_AUTOMATION/Current", current_A);
-  fb.setFloat("SOLAR_HOME_AUTOMATION/Power", power_W);
-  fb.setFloat("SOLAR_HOME_AUTOMATION/Battery_Percentage", percent);
+  // 🔸 SEND TO FIREBASE
+  fb.setFloat("SOLAR_HOME_AUTOMATION/VOLTAGE", busVoltage);
+  fb.setFloat("SOLAR_HOME_AUTOMATION/CURRENT", current_A);
+  fb.setFloat("SOLAR_HOME_AUTOMATION/POWER", power_W);
+  fb.setFloat("SOLAR_HOME_AUTOMATION/BATTERY_PERCENTAGE", percent);
 }
 
 // =============================================================
-// 🔹 FUNCTION: Connect to Available Wi-Fi
+// 🔹 FUNCTION: Connect to Wi-Fi Automatically
 // =============================================================
 void connectToWiFi() {
   Serial.println("Scanning Wi-Fi...");
