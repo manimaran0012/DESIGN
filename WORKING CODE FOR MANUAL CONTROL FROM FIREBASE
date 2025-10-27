@@ -5,8 +5,8 @@
 Firebase fb(FIREBASE_URL);
 
 // Wi-Fi credentials
-const char* ssids[] = {"Infinix HOT 30 5G", "AnotherSSID", "HomeWiFi"};
-const char* passwords[] = {"mani00122", "password2", "password3"};
+const char* ssids[] = {"Infinix HOT 30 5G", "Galaxy F6292c9", "DESKTOP-LA7NV8S 3011"};
+const char* passwords[] = {"mani00122", "dxwm3987", "manimaran"};
 const int WIFI_COUNT = 3;
 
 // Relay pins (LOW-level trigger)
@@ -52,7 +52,7 @@ void loop() {
       Serial.print(" | LIGHT2: "); Serial.println(light2);
 
       // LOW-level trigger relay control (directly follow Firebase)
-      digitalWrite(RELAY1, fan.equalsIgnoreCase("ture") ? LOW : HIGH);
+      digitalWrite(RELAY1, fan.equalsIgnoreCase("true") ? LOW : HIGH);
       digitalWrite(RELAY2, light1.equalsIgnoreCase("true") ? LOW : HIGH);
       digitalWrite(RELAY3, light2.equalsIgnoreCase("true") ? LOW : HIGH);
 
