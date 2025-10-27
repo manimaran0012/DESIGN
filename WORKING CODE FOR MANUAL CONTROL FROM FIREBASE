@@ -52,9 +52,9 @@ void loop() {
       Serial.print(" | LIGHT2: "); Serial.println(light2);
 
       // LOW-level trigger relay control (directly follow Firebase)
-      digitalWrite(RELAY1, fan.equalsIgnoreCase("ON") ? LOW : HIGH);
-      digitalWrite(RELAY2, light1.equalsIgnoreCase("ON") ? LOW : HIGH);
-      digitalWrite(RELAY3, light2.equalsIgnoreCase("ON") ? LOW : HIGH);
+      digitalWrite(RELAY1, fan.equalsIgnoreCase("ture") ? LOW : HIGH);
+      digitalWrite(RELAY2, light1.equalsIgnoreCase("true") ? LOW : HIGH);
+      digitalWrite(RELAY3, light2.equalsIgnoreCase("true") ? LOW : HIGH);
 
     } else {
       Serial.println("Failed to read Firebase devices!");
