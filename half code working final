@@ -1,0 +1,210 @@
+#include <Wire.h>
+#include <WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include <Adafruit_INA219.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
+
+// ==============================
+// 🔹 Wi-Fi Credentials (Multiple SSIDs)
+// ==============================
+const char* ssids[] = {"Infinix HOT 30 5G", "Galaxy F6292c9", "DESKTOP-LA7NV8S 3011"};
+const char* passwords[] = {"mani00122", "dxwm3987", "manimaran"};
+const int WIFI_COUNT = 3;
+
+// ==============================
+// 🔹 Firebase Configuration
+// ==============================
+#define DATABASE_URL "https://solarproject-92dff-default-rtdb.firebaseio.com/"   // Your RTDB URL
+#define DATABASE_SECRET "TyNwDxrzTNG92I8PMPtSsnVZY1GKqRPmiZ5drYcx" // Replace this!
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+// ==============================
+// 🔹 Relay Pins (LOW-level trigger)
+// ==============================
+#define RELAY1 25  // FAN
+#define RELAY2 26  // LIGHT1
+#define RELAY3 27  // LIGHT2
+#define RELAY4 14  // MOTOR PUMP
+
+// ==============================
+// 🔹 INA219 Sensor Setup
+// ==============================
+Adafruit_INA219 ina219;
+bool sensorConnected = false;
+
+// ==============================
+// 🔹 Timing
+// ==============================
+unsigned long sensorMillis = 0;
+const long sensorInterval = 2000; // Sensor data upload every 2 s
+
+// =============================================================
+// 🔹 Setup
+// =============================================================
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(21, 22);
+
+  connectToWiFi();
+
+  // Relay setup
+  pinMode(RELAY1, OUTPUT);
+  pinMode(RELAY2, OUTPUT);
+  pinMode(RELAY3, OUTPUT);
+  pinMode(RELAY4, OUTPUT);
+  digitalWrite(RELAY1, HIGH);
+  digitalWrite(RELAY2, HIGH);
+  digitalWrite(RELAY3, HIGH);
+  digitalWrite(RELAY4, HIGH);
+
+  // INA219
+  if (ina219.begin()) {
+    sensorConnected = true;
+    ina219.setCalibration_32V_2A();
+    Serial.println("✅ INA219 sensor detected and initialized.");
+  } else {
+    Serial.println("⚠️ INA219 not found. Continuing without sensor data.");
+  }
+
+  // Firebase setup
+  config.database_url = DATABASE_URL;
+  config.signer.tokens.legacy_token = DATABASE_SECRET;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  // Begin Firebase streaming for instant updates
+  if (!Firebase.RTDB.beginStream(&fbdo, "/SOLAR_HOME_AUTOMATION"))
+    Serial.println("🔥 Stream begin failed!");
+  else
+    Firebase.RTDB.setStreamCallback(&fbdo, streamCallback, streamTimeoutCallback);
+
+  Serial.println("✅ Setup complete. Waiting for real-time Firebase control...");
+}
+
+// =============================================================
+// 🔹 Loop
+// =============================================================
+void loop() {
+  // Auto-reconnect Wi-Fi if disconnected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ Wi-Fi disconnected! Reconnecting...");
+    connectToWiFi();
+  }
+
+  // Upload sensor data every 2 s
+  if (millis() - sensorMillis >= sensorInterval) {
+    sensorMillis = millis();
+    if (sensorConnected) readAndUploadINA219();
+  }
+}
+
+// =============================================================
+// 🔹 Stream Callback — Instant Firebase Control
+// =============================================================
+void streamCallback(FirebaseStream data) {
+  String path = data.dataPath();
+  String value = data.stringData();
+  value.trim(); value.replace("\"", "");
+
+  Serial.printf("🔥 Firebase changed: %s -> %s\n", path.c_str(), value.c_str());
+
+  if (path == "/FAN")
+    digitalWrite(RELAY1, value.equalsIgnoreCase("true") ? LOW : HIGH);
+  else if (path == "/LIGHT1")
+    digitalWrite(RELAY2, value.equalsIgnoreCase("true") ? LOW : HIGH);
+  else if (path == "/LIGHT2")
+    digitalWrite(RELAY3, value.equalsIgnoreCase("true") ? LOW : HIGH);
+  else if (path == "/MOTOR_PUMP")
+    digitalWrite(RELAY4, value.equalsIgnoreCase("true") ? LOW : HIGH);
+}
+
+void streamTimeoutCallback(bool timeout) {
+  if (timeout) Serial.println("⚠️ Stream timeout, reconnecting...");
+}
+
+// =============================================================
+// 🔹 INA219 Sensor Upload
+// =============================================================
+void readAndUploadINA219() {
+  float busVoltage = ina219.getBusVoltage_V();
+  float current_mA = ina219.getCurrent_mA();
+  float power_mW = ina219.getPower_mW();
+
+  if (isnan(busVoltage) || isnan(current_mA) || isnan(power_mW)) {
+    Serial.println("⚠️ Invalid INA219 reading!");
+    return;
+  }
+
+  float current_A = current_mA / 1000.0;
+  float power_W = power_mW / 1000.0;
+  float percent = (busVoltage - 9.6) * 100 / (12.6 - 9.6);
+  if (percent > 100) percent = 100;
+  if (percent < 0) percent = 0;
+
+  Serial.println("------------------------------------------");
+  Serial.printf("VOLTAGE : %.2f V\n", busVoltage);
+  Serial.printf("CURRENT : %.3f A\n", current_A);
+  Serial.printf("POWER : %.3f W\n", power_W);
+  Serial.printf("BATTERY_PERCENTAGE : %.1f %%\n", percent);
+  Serial.println("------------------------------------------\n");
+
+  Firebase.RTDB.setFloat(&fbdo, "SOLAR_HOME_AUTOMATION/VOLTAGE", busVoltage);
+  Firebase.RTDB.setFloat(&fbdo, "SOLAR_HOME_AUTOMATION/CURRENT", current_A);
+  Firebase.RTDB.setFloat(&fbdo, "SOLAR_HOME_AUTOMATION/POWER", power_W);
+  Firebase.RTDB.setFloat(&fbdo, "SOLAR_HOME_AUTOMATION/BATTERY_PERCENTAGE", percent);
+}
+
+// =============================================================
+// 🔹 Continuous Wi-Fi Scanner and Connector
+// =============================================================
+void connectToWiFi() {
+  Serial.println("🔍 Scanning for known Wi-Fi networks...");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+      Serial.println("⚠️ No Wi-Fi networks found! Rescanning...");
+      delay(2000);
+      continue;
+    }
+
+    bool foundNetwork = false;
+    for (int i = 0; i < WIFI_COUNT; i++) {
+      for (int j = 0; j < n; j++) {
+        if (String(WiFi.SSID(j)) == ssids[i]) {
+          foundNetwork = true;
+          Serial.printf("📡 Found known Wi-Fi: %s (Signal: %d dBm)\n", ssids[i], WiFi.RSSI(j));
+          Serial.printf("🔗 Connecting to %s ...\n", ssids[i]);
+          WiFi.begin(ssids[i], passwords[i]);
+
+          int attempts = 0;
+          while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+            delay(500);
+            Serial.print(".");
+            attempts++;
+          }
+
+          if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("\n✅ Connected to %s\n", ssids[i]);
+            Serial.print("📶 IP Address: ");
+            Serial.println(WiFi.localIP());
+            return;
+          } else {
+            Serial.println("\n❌ Connection failed. Retrying scan...");
+            WiFi.disconnect(true);
+            delay(1000);
+          }
+        }
+      }
+    }
+
+    if (!foundNetwork) {
+      Serial.println("⚠️ No known Wi-Fi found. Rescanning in 3 s...");
+      delay(3000);
+    }
+  }
+}
